@@ -1,6 +1,8 @@
 # extralife-matrixportal-tracker
 Tracking donations for ExtraLife on a 32x64 RGB Matrix via MatrixPortal
 
+![Countdown in Action](https://github.com/user-attachments/assets/621276b6-5512-4727-baa7-6012e2433044)
+
 ## Features
 
 This tracker will display the number of hours, minutes, and seconds until your 24 hour game day event.  Once it hits that time, it will begin to count up so you can track how long you've been gaming for.
