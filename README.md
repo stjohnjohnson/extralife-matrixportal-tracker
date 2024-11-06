@@ -58,6 +58,10 @@ secrets = {
     'refresh_frequency': 30,
     # What ExtraLife server to use
     'extralife_server': 'https://www.extra-life.org',
+    # How many hours should it count up?
+    'hide_after': 26,
+    # How many hours should it count down?
+    'hide_before': 999,
 }
 ```
 
