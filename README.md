@@ -1,5 +1,5 @@
 # extralife-matrixportal-tracker
-Tracking donations for ExtraLife on a 32x64 RGB Matrix via MatrixPortal
+Tracking donations for ExtraLife on a 32x64 RGB Matrix via an Adafruit Matrix Portal.
 
 ![Countdown in Action](https://github.com/user-attachments/assets/621276b6-5512-4727-baa7-6012e2433044)
 
@@ -8,6 +8,16 @@ Tracking donations for ExtraLife on a 32x64 RGB Matrix via MatrixPortal
 This tracker will display the number of hours, minutes, and seconds until your 24 hour game day event.  Once it hits that time, it will begin to count up so you can track how long you've been gaming for.
 
 Additionally, it will show the current donation total.
+
+## Hardware
+
+To build this I got the following items:
+ - [Adafruit Matrix Portal S3](https://www.adafruit.com/product/5778)
+ - [64x32 RGB LED Matrix - 4mm pitch](https://www.adafruit.com/product/2278)
+ - [Black LED Diffusion Acrylic Panel - 10.2"x5.1"](https://www.adafruit.com/product/4749)
+ - [Clear Adhesive Squares](https://www.adafruit.com/product/4813)
+ - [Adjustable Bent-Wire Stand](https://www.adafruit.com/product/1679)
+ - [Vertical Wall Power Supply USB C - 5V/3A with Switch](https://www.adafruit.com/product/5801)
 
 ## Installation
 
