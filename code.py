@@ -97,7 +97,7 @@ def time_until_target(target_date):
         int: The hours until/from that date.
         int: The minutes until/from that date.
         int: The seconds until/from that date.
-        int: If we're in the display range, -1 before, 0 good, +1 after
+        int: Display status: -1 (before display window), 0 (within display window), +1 (after display window)
     """
 
     # Get the current UTC time
@@ -159,7 +159,9 @@ def money_raised(cached=True):
 
         donation_total = data["sumDonations"]
         donation_goal = data["fundraisingGoal"]
-        donation_percent = donation_total / donation_goal * 100
+        donation_percent = 0.0
+        if donation_goal > 0:
+            donation_percent = donation_total / donation_goal * 100
 
         donation_cache = [
             format_dollars(donation_total), format_dollars(donation_goal), donation_percent
@@ -172,7 +174,7 @@ def update_display():
     Updates the countdown/up clock with the current time & donations.
     """
     hours, minutes, seconds, hidden = time_until_target(target_date)
-    total_raised, goal, perc = money_raised()
+    total_raised, _, _ = money_raised()
 
     if hidden < 0:
         # Move to bottom and display the year
@@ -202,7 +204,7 @@ def display_labels(top, bottom=None):
         top (Label): The top label.
         bottom (Label): The bottom label.
     """
-    if (bottom == None):
+    if bottom is None:
         center_label(top, 3)
     else:
         center_label(top, 1)
@@ -246,17 +248,21 @@ while True:
         try:
             money_raised(False)
             last_check = time.monotonic()
-        except RuntimeError as e:
-            print("Some error occured, retrying! -", e)
+        except (RuntimeError, OSError) as e:
+            print("Some error occurred, retrying! -", e)
 
     # Sync time every 30 minutes
     if last_sync is None or time.monotonic() > last_sync + 1800:
         try:
             matrix.get_local_time("UTC")  # Synchronize Board's clock to Internet
             last_sync = time.monotonic()
-        except RuntimeError as e:
-            print("Some error occured, retrying! -", e)
+        except (RuntimeError, OSError) as e:
+            print("Some error occurred, retrying! -", e)
 
-    update_display()
+    try:
+        update_display()
+    except (RuntimeError, OSError) as e:
+        print("Display update error, retrying! -", e)
+
     time.sleep(1)
  # type: ignore
