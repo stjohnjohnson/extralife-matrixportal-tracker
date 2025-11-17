@@ -19,6 +19,8 @@ extralife_server = 'https://www.extra-life.org'
 refresh_frequency = 30
 hide_after = 26
 hide_before = 999
+last_raised = 0
+last_year = 0
 
 try:
     from secrets import secrets # type: ignore
@@ -35,6 +37,10 @@ try:
         hide_after = secrets["hide_after"]
     if "hide_before" in secrets:
         hide_before = secrets["hide_before"]
+    if "last_raised" in secrets:
+        last_raised = secrets["last_raised"]
+    if "last_year" in secrets:
+        last_year = secrets["last_year"]
 
 except ImportError:
     print("Configuration settings are kept in secrets.py, please add them there!")
@@ -50,6 +56,7 @@ print("Extra Life Server: {}".format(extralife_server))
 print("Refresh Frequency: {}s".format(refresh_frequency))
 print("Hiding Counter After: {}h".format(hide_after))
 print("Hiding Counter Before: {}h".format(hide_before))
+print("Last Raised: ${} in {}".format(last_raised, last_year))
 
 # --- Display setup ---
 matrix = MatrixPortal(
@@ -71,11 +78,13 @@ tile_grid = displayio.TileGrid(bitmap, pixel_shader=color)
 group.append(tile_grid)  # Add the TileGrid to the Group
 display.root_group = group
 font = bitmap_font.load_font("/Micro5-Regular-21.bdf")
-
+# Labels
 clock_label = Label(font, background_tight=True)
 clock_label.color = color[1]
 money_label = Label(font, background_tight=True)
 money_label.color = color[2]
+# Caching
+donation_cache = ["", "", 0.0]
 
 def time_until_target(target_date):
     """
@@ -88,7 +97,7 @@ def time_until_target(target_date):
         int: The hours until/from that date.
         int: The minutes until/from that date.
         int: The seconds until/from that date.
-        int: The direction (-1 counting down, +1 counting up).
+        int: Display status: -1 (before display window), 0 (within display window), +1 (after display window)
     """
 
     # Get the current UTC time
@@ -107,7 +116,12 @@ def time_until_target(target_date):
     minutes = (seconds % 3600) // 60
     seconds = seconds % 60
 
-    return hours, minutes, seconds, direction
+    # Show or hide the clock
+    hidden = direction
+    if (direction < 0 and hours < hide_before) or (direction > 0 and hours < hide_after):
+        hidden = 0
+
+    return hours, minutes, seconds, hidden
 
 def format_dollars(amount):
     """
@@ -125,57 +139,76 @@ def format_dollars(amount):
     formatted = "${:,}".format(amount_int)
     return formatted
 
-def money_raised():
+def money_raised(cached=True):
     """
     Retrieves the current donations and goal
+
+    Args:
+        cached (bool): Pull from cache?
 
     Returns:
         str: The dollar donation total.
         str: The dollar donation goal.
         float: Percent of goal met.
     """
+    global donation_cache
+    if not cached:
+        url = "{}/api/participants/{}".format(extralife_server, extralife_id)
+        print("Fetching text from {}".format(url))
+        data = matrix.network.fetch(url).json()
 
-    url = "{}/api/participants/{}".format(extralife_server, extralife_id)
-    print("Fetching text from {}".format(url))
-    data = matrix.network.fetch(url).json()
+        donation_total = data["sumDonations"]
+        donation_goal = data["fundraisingGoal"]
+        donation_percent = 0.0
+        if donation_goal > 0:
+            donation_percent = donation_total / donation_goal * 100
 
-    donation_total = data["sumDonations"]
-    donation_goal = data["fundraisingGoal"]
-    donation_percent = donation_total / donation_goal * 100
+        donation_cache = [
+            format_dollars(donation_total), format_dollars(donation_goal), donation_percent
+        ]
 
-    return format_dollars(donation_total), format_dollars(donation_goal), donation_percent
+    return donation_cache[0], donation_cache[1], donation_cache[2]
 
-def update_donation():
+def update_display():
     """
-    Updates the donation label with the current amounts.
+    Updates the countdown/up clock with the current time & donations.
     """
-    total, goal, percent = money_raised()
-    money_label.text = total
+    hours, minutes, seconds, hidden = time_until_target(target_date)
+    total_raised, _, _ = money_raised()
 
+    if hidden < 0:
+        # Move to bottom and display the year
+        display_labels(money_label, clock_label)
+        money_label.text = format_dollars(last_raised)
+        clock_label.text = "in {}".format(last_year)
 
-def update_time():
+    elif hidden > 0:
+        # Move to bottom and display "raised"
+        display_labels(money_label, clock_label)
+        money_label.text = total_raised
+        clock_label.text = "RAISED"
+
+    else:
+        # Move to top and display countdown/up
+        display_labels(clock_label, money_label)
+        clock_label.text = "{hours}:{minutes:02d}:{seconds:02d}".format(
+            hours=hours, minutes=minutes, seconds=seconds
+        )
+        money_label.text = total_raised
+
+def display_labels(top, bottom=None):
     """
-    Updates the countdown/up clock with the current time.
+    Positions the two labels appropriately (in case we swap them)
 
-    Returns:
-        bool: Should we still display the time?
+    Args:
+        top (Label): The top label.
+        bottom (Label): The bottom label.
     """
-    hours, minutes, seconds, direction = time_until_target(target_date)
-
-    clock_label.text = "{hours}:{minutes:02d}:{seconds:02d}".format(
-        hours=hours, minutes=minutes, seconds=seconds
-    )
-    bbx, bby, bbwidth, bbh = clock_label.bounding_box
-
-    # Center the label
-    center_label(clock_label, 1)
-
-    # Hide if the hours exceeds configuration
-    if direction < 0 and hours >= hide_before:
-        return False
-    if direction > 0 and hours >= hide_after:
-        return False
-    return True
+    if bottom is None:
+        center_label(top, 3)
+    else:
+        center_label(top, 1)
+        center_label(bottom, 2)
 
 def center_label(label, position):
     """
@@ -194,7 +227,7 @@ def center_label(label, position):
     if position == 1: # Top
         label.y = (bbh // 2) + 1
     elif position == 2: # Bottom
-        label.y = display.height - (bbh // 2) - 4
+        label.y = display.height - (bbh // 2) - 5
     elif position == 3: # Center
         label.y = (display.height // 2) - 2
 
@@ -202,53 +235,34 @@ def center_label(label, position):
         print("Label bounding box: {},{},{},{}".format(bbx, bby, bbwidth, bbh))
         print("Label x: {} y: {}".format(label.x, label.y))
 
+# Last Syncs
 last_check = None
 last_sync = None
-# bootstrap the internet clock
-matrix.get_local_time("UTC")
 # add the labels
 group.append(clock_label)
 group.append(money_label)
-# hide them
-group[1].hidden = True
-group[2].hidden = True
-# get the latest data
-update_donation()
-if update_time():
-    group[1].hidden = False
-    money_label.color = color[2]
-    center_label(money_label, 2)
-else:
-    group[1].hidden = True
-    money_label.color = color[1]
-    center_label(money_label, 3)
-group[2].hidden = False
 
 while True:
     # Check for donations every X seconds
     if last_check is None or time.monotonic() > last_check + refresh_frequency:
         try:
-            update_donation()
+            money_raised(False)
             last_check = time.monotonic()
-        except RuntimeError as e:
-            print("Some error occured, retrying! -", e)
+        except (RuntimeError, OSError) as e:
+            print("Some error occurred, retrying! -", e)
 
     # Sync time every 30 minutes
     if last_sync is None or time.monotonic() > last_sync + 1800:
         try:
             matrix.get_local_time("UTC")  # Synchronize Board's clock to Internet
             last_sync = time.monotonic()
-        except RuntimeError as e:
-            print("Some error occured, retrying! -", e)
+        except (RuntimeError, OSError) as e:
+            print("Some error occurred, retrying! -", e)
 
-    if update_time():
-        group[1].hidden = False
-        money_label.color = color[2]
-        center_label(money_label, 2)
-    else:
-        group[1].hidden = True
-        money_label.color = color[1]
-        center_label(money_label, 3)
+    try:
+        update_display()
+    except (RuntimeError, OSError) as e:
+        print("Display update error, retrying! -", e)
 
     time.sleep(1)
  # type: ignore
