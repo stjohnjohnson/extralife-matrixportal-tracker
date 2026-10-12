@@ -5,9 +5,19 @@ Tracking donations for ExtraLife on a 32x64 RGB Matrix via an Adafruit Matrix Po
 
 ## Features
 
-This tracker will display the number of hours, minutes, and seconds until your 24 hour game day event.  Once it hits that time, it will begin to count up so you can track how long you've been gaming for.
+The display adapts to four phases of the annual fundraiser:
 
-Additionally, it will show the current donation total.
+- Before the countdown, it slowly rotates through the prior-year result, the
+  live all-time total, the number of days until the event, and `stj.watch`.
+- Below 1,000 remaining hours, the countdown and current-year donation amount
+  appear every other card alongside UCSF and website context.
+- During the 25-hour stream and one-hour celebration window, the display stays
+  fixed on the count-up timer and live donation amount.
+- After hour 26, it rotates through the current-year result, its UCSF purpose,
+  the live all-time total, and `stj.watch` through the end of the year.
+
+Cards remain visible for 15 seconds and change without animation so the display
+stays calm when it appears in the background of video calls.
 
 ## Hardware
 
@@ -58,7 +68,7 @@ secrets = {
     # https://www.extra-life.org/index.cfm?fuseaction=donordrive.participant&participantID=_your_id_
     'extralife_id': '_your_participant_id_',
     # ISO8601 formatted UTC time for your game day event
-    'target_date': '2024-11-02T17:30:00',
+    'target_date': '2026-11-07T16:30:00',
 }
 ```
 
@@ -72,10 +82,28 @@ secrets = {
     'extralife_server': 'https://www.extra-life.org',
     # How many hours should it count up?
     'hide_after': 26,
-    # How many hours should it count down?
-    'hide_before': 999,
+    # Start the countdown below this many remaining hours. A value of 1000
+    # permits the largest displayable countdown, 999:59:59.
+    'hide_before': 1000,
+    # Previous calendar year's final total
+    'last_raised': 28783,
+    'last_year': 2025,
+    # Lifetime total through the end of the previous calendar year
+    'lifetime_raised': 88488,
 }
 ```
+
+The planned stream lasts 25 hours. The default `hide_after` value keeps the
+count-up visible for one additional hour while the stream wraps up and
+celebrates.
+
+### Annual Rollover
+
+Extra Life switches the participant API to the new campaign on January 1. At
+the start of each calendar year, update `extralife_id`, `target_date`,
+`last_raised`, `last_year`, and `lifetime_raised` in your local `secrets.py`.
+The lifetime value should include every completed campaign through the end of
+the prior year; the display adds the API's live current-year amount to it.
 
 ## Inspiration
 
@@ -86,3 +114,57 @@ Based on the Metro_Matrix_Clock from John Park at Adafruit Industries (MIT Licen
 ## Font
 
 I've bundled a slightly modified version of the [Micro 5 font](https://fonts.google.com/specimen/Micro+5).  I've specified a specific font size, added an extra pixel column to the `1` to ensure they are monospaced.
+## Development
+
+### Linting & Formatting
+
+This repo uses `ruff` (lint) and `black` (format) for local development:
+
+```bash
+make lint
+make format
+make test
+```
+
+### Deployment
+
+Assuming your device is mounted at `/Volumes/CIRCUITPY`:
+
+```bash
+make install
+make update
+```
+
+You can override the mount point:
+
+```bash
+make install CIRCUITPY=/path/to/device
+```
+
+### Serial Monitor
+
+```bash
+make serial
+```
+
+You can override the detected device:
+
+```bash
+make serial SERIAL=/dev/cu.usbmodemXXXX
+```
+
+To capture logs to a file:
+
+```bash
+make serial-log
+```
+
+This writes to `/tmp/circuitpy.log` until you press Ctrl-C.
+
+### Mock Display (CPython)
+
+You can run a tiny CPython-only mock to sanity-check the time/label logic:
+
+```bash
+python3 tools/mock_display.py
+```
