@@ -119,6 +119,26 @@ def track_rotation(*, current_phase, monotonic_now, active_phase, phase_started_
     return active_phase, phase_started_at, monotonic_now - phase_started_at
 
 
+class RotationClock:
+    """Pause card dwell time without pausing the real countdown/count-up."""
+
+    def __init__(self):
+        self.phase = None
+        self.elapsed = 0.0
+        self.updated_at = None
+        self.paused = False
+
+    def update(self, phase, now, paused=False):
+        if phase != self.phase or self.updated_at is None:
+            self.phase = phase
+            self.elapsed = 0.0
+        elif not self.paused:
+            self.elapsed += max(0, now - self.updated_at)
+        self.updated_at = now
+        self.paused = paused
+        return self.elapsed
+
+
 class DisplayState:
     def __init__(
         self,

@@ -11,23 +11,36 @@ from adafruit_datetime import datetime
 from adafruit_display_text.label import Label
 from adafruit_matrixportal.matrixportal import MatrixPortal
 
+from lib_celebration import (
+    ENTRANCE_SECONDS,
+    EXIT_SECONDS,
+    FRAME_SECONDS,
+    GAP_SECONDS,
+    Celebration,
+    paint_text,
+    slide_frame,
+    sparkle_pixels,
+    star_thresholds,
+    starburst_frame,
+)
 from lib_display import (
+    RotationClock,
     display_colors,
     display_phase,
     display_text,
     format_dollars,
     render_state,
     single_line_position,
-    track_rotation,
     two_line_positions,
 )
+from lib_donations import DonationTracker, PollSchedule, api_server, fetch_json
 
 DEBUG = False
 
 # Get configuration settings from a secrets.py file
 target_date = None
 extralife_id = None
-extralife_server = "https://www.extra-life.org"
+extralife_server = "https://dd.extra-life.org"
 refresh_frequency = 30
 hide_after = 26
 hide_before = 1000
@@ -64,6 +77,8 @@ except ImportError:
 if target_date is None or extralife_id is None:
     raise Exception("Target Date and ExtraLife ID Required")
 
+extralife_server = api_server(extralife_server)
+
 print("Extra Life Countdown and Tracker")
 print("Target Date: {}".format(target_date.isoformat()))
 print("Extra Life ID: {}".format(extralife_id))
@@ -80,7 +95,7 @@ display = matrix.display
 
 # --- Drawing setup ---
 group = displayio.Group()  # Create a Group
-bitmap = displayio.Bitmap(64, 32, 2)  # Create a bitmap object,width, height, bit depth
+bitmap = displayio.Bitmap(64, 32, 4)
 color = displayio.Palette(4)  # Create a color palette
 color[0] = 0x000000  # black background
 color[1] = 0x1AC1DD  # teal context
@@ -97,8 +112,39 @@ clock_label = Label(font, background_tight=True)
 clock_label.color = color[1]
 money_label = Label(font, background_tight=True)
 money_label.color = color[2]
+normal_group = displayio.Group()
+normal_group.append(clock_label)
+normal_group.append(money_label)
+group.append(normal_group)
+
+# Celebration labels and snapshots are reused, rather than allocated per frame.
+gift_label = Label(font, background_tight=True)
+gift_label.color = color[2]
+donor_label = Label(font, background_tight=True)
+donor_label.color = color[1]
+donation_group = displayio.Group()
+donation_group.append(gift_label)
+donation_group.append(donor_label)
+donation_group.hidden = True
+group.append(donation_group)
+old_snapshot = displayio.Bitmap(64, 32, 4)
+new_snapshot = displayio.Bitmap(64, 32, 4)
+reveal_thresholds = star_thresholds()
+sparkles = displayio.Bitmap(64, 32, 4)
+sparkle_colors = displayio.Palette(4)
+sparkle_colors[3] = color[3]
+sparkle_colors.make_transparent(0)
+group.append(displayio.TileGrid(sparkles, pixel_shader=sparkle_colors))
 # Caching
 donation_cache = ["--", "--", 0.0, None]
+tracker = DonationTracker()
+schedule = PollSchedule(refresh_frequency)
+rotation_clock = RotationClock()
+active_celebration = None
+celebration_donation = None
+celebration_started_at = 0
+next_celebration_at = 0
+last_stage = None
 
 
 def money_raised(cached=True):
@@ -118,10 +164,17 @@ def money_raised(cached=True):
     if not cached:
         url = "{}/api/participants/{}".format(extralife_server, extralife_id)
         print("Fetching text from {}".format(url))
-        data = matrix.network.fetch(url).json()
+        data = fetch_json(matrix.network, url)
 
         donation_total = data["sumDonations"]
         donation_goal = data["fundraisingGoal"]
+        if (
+            not isinstance(donation_total, (int, float))
+            or not 0 <= donation_total <= 1e9
+        ):
+            raise ValueError("Invalid donation total")
+        if not isinstance(donation_goal, (int, float)) or not 0 <= donation_goal <= 1e9:
+            raise ValueError("Invalid fundraising goal")
         donation_percent = 0.0
         if donation_goal > 0:
             donation_percent = donation_total / donation_goal * 100
@@ -136,14 +189,8 @@ def money_raised(cached=True):
     return donation_cache[0], donation_cache[1], donation_cache[2], donation_cache[3]
 
 
-active_phase = None
-phase_started_at = None
-
-
 def update_display():
     """Render the current phase and rotation card."""
-    global active_phase, phase_started_at
-
     _, _, _, total_raised_value = money_raised()
     now = datetime.now()
     monotonic_now = time.monotonic()
@@ -153,11 +200,10 @@ def update_display():
         hide_after=hide_after,
         hide_before=hide_before,
     )
-    active_phase, phase_started_at, rotation_elapsed = track_rotation(
-        current_phase=phase,
-        monotonic_now=monotonic_now,
-        active_phase=active_phase,
-        phase_started_at=phase_started_at,
+    rotation_elapsed = rotation_clock.update(
+        phase,
+        monotonic_now,
+        paused=active_celebration is not None,
     )
 
     state = render_state(
@@ -172,8 +218,12 @@ def update_display():
         rotation_elapsed=rotation_elapsed,
     )
 
-    clock_label.text = display_text(state.top_text)
-    money_label.text = display_text(state.bottom_text)
+    top_text = display_text(state.top_text)
+    bottom_text = display_text(state.bottom_text)
+    if clock_label.text != top_text:
+        clock_label.text = top_text
+    if money_label.text != bottom_text:
+        money_label.text = bottom_text
     clock_label.color, money_label.color = display_colors(
         state,
         context_color=color[1],
@@ -215,34 +265,167 @@ def display_labels(state, top, bottom=None):
         )
 
 
-# Last Syncs
-last_check = None
-last_sync = None
-# add the labels
-group.append(clock_label)
-group.append(money_label)
+def snapshot(target, top, bottom):
+    """Capture visible label pixels in the shared four-color palette."""
+    target.fill(0)
+    for label in (top, bottom):
+        color_index = 1
+        for index in (1, 2, 3):
+            if label.color == color[index]:
+                color_index = index
+                break
+        paint_text(target, font, label.text, (label.x, label.y), color_index)
 
-while True:
-    # Check for donations every X seconds
-    if last_check is None or time.monotonic() > last_check + refresh_frequency:
-        try:
-            money_raised(False)
-            last_check = time.monotonic()
-        except (RuntimeError, OSError) as e:
-            print("Some error occurred, retrying! -", e)
 
-    # Sync time every 30 minutes
-    if last_sync is None or time.monotonic() > last_sync + 1800:
-        try:
-            matrix.get_local_time("UTC")  # Synchronize Board's clock to Internet
-            last_sync = time.monotonic()
-        except (RuntimeError, OSError) as e:
-            print("Some error occurred, retrying! -", e)
+def start_celebration(now):
+    """Pause rotation and prepare one donor's entrance."""
+    global active_celebration, celebration_donation, celebration_started_at, last_stage
 
-    try:
+    celebration_donation = tracker.pop()
+    if celebration_donation is None:
+        return
+    # Assign before label work so display-error recovery can put this donor back.
+    active_celebration = True
+    update_display()
+    snapshot(old_snapshot, clock_label, money_label)
+    gift_label.text = display_text(celebration_donation.amount_text)
+    gift_label.color = color[2] if gift_label.text.startswith("$") else color[1]
+    donor_label.text = display_text(celebration_donation.name)
+    active_celebration = Celebration(gift_label.bounding_box, donor_label.bounding_box)
+    top_position, bottom_position = active_celebration.positions(0)
+    gift_label.x, gift_label.y = top_position
+    donor_label.x, donor_label.y = bottom_position
+    snapshot(new_snapshot, gift_label, donor_label)
+    normal_group.hidden = True
+    donation_group.hidden = True
+    celebration_started_at = time.monotonic()
+    last_stage = None
+
+
+def finish_celebration(now, retry=False):
+    """Always clear effects and restore the normal display groups."""
+    global active_celebration, celebration_donation, next_celebration_at, last_stage
+
+    if retry and celebration_donation is not None:
+        tracker.pending.insert(0, celebration_donation)
+    active_celebration = None
+    celebration_donation = None
+    next_celebration_at = now + (5 if retry else GAP_SECONDS)
+    last_stage = None
+    bitmap.fill(0)
+    sparkles.fill(0)
+    donation_group.hidden = True
+    normal_group.hidden = False
+
+
+def update_celebration(now):
+    """Paint only the moving layer; labels remain reusable display objects."""
+    global last_stage
+
+    elapsed = now - celebration_started_at
+    stage = active_celebration.stage(elapsed)
+    if stage == "done":
+        finish_celebration(now)
         update_display()
-    except (RuntimeError, OSError) as e:
-        print("Display update error, retrying! -", e)
+        return
+    if stage == "entrance":
+        starburst_frame(
+            bitmap,
+            old_snapshot,
+            new_snapshot,
+            reveal_thresholds,
+            elapsed / ENTRANCE_SECONDS,
+        )
+    elif stage == "exit":
+        if last_stage != "exit":
+            sparkles.fill(0)
+            snapshot(old_snapshot, gift_label, donor_label)
+            update_display()
+            snapshot(new_snapshot, clock_label, money_label)
+            donation_group.hidden = True
+        slide_frame(
+            bitmap,
+            old_snapshot,
+            new_snapshot,
+            (elapsed - active_celebration.exit_at) / EXIT_SECONDS,
+        )
+    else:
+        if last_stage == "entrance":
+            bitmap.fill(0)
+        donation_group.hidden = False
+        top_position, bottom_position = active_celebration.positions(elapsed)
+        gift_label.x, gift_label.y = top_position
+        donor_label.x, donor_label.y = bottom_position
+        sparkles.fill(0)
+        if stage == "sparkles":
+            for x, y in sparkle_pixels(elapsed - ENTRANCE_SECONDS):
+                sparkles[y * 64 + x] = 3
+    last_stage = stage
 
-    time.sleep(1)
+
+def run_forever():
+    """Keep animation frames separate from rate-aware blocking network jobs."""
+    last_normal_at = None
+    last_frame_at = None
+    while True:
+        now = time.monotonic()
+        job = schedule.ready(
+            now,
+            busy=active_celebration is not None,
+            feed_has_room=tracker.has_room,
+        )
+        if job is not None:
+            success = False
+            try:
+                if job == "sync":
+                    matrix.get_local_time("UTC")
+                elif job == "total":
+                    money_raised(False)
+                else:
+                    data = fetch_json(
+                        matrix.network,
+                        tracker.url(extralife_server, extralife_id),
+                        empty_list=True,
+                    )
+                    tracker.accept_page(data)
+                    del data
+                success = True
+            except (
+                RuntimeError,
+                OSError,
+                ValueError,
+                TypeError,
+                KeyError,
+                MemoryError,
+            ) as error:
+                print("{} request failed, backing off: {}".format(job, error))
+            schedule.record(job, time.monotonic(), success)
+
+        now = time.monotonic()
+        try:
+            if active_celebration is not None:
+                if last_frame_at is None or now - last_frame_at >= FRAME_SECONDS:
+                    update_celebration(now)
+                    last_frame_at = now
+            else:
+                if last_normal_at is None or now - last_normal_at >= 1:
+                    update_display()
+                    last_normal_at = now
+                if tracker.pending and now >= next_celebration_at:
+                    start_celebration(now)
+                    now = time.monotonic()
+                    update_celebration(now)
+                    last_frame_at = now
+        except (RuntimeError, OSError, ValueError, TypeError, MemoryError) as error:
+            print("Display update error, retrying: {}".format(error))
+            finish_celebration(now, retry=True)
+        if active_celebration is not None:
+            frame_cost = time.monotonic() - last_frame_at
+            time.sleep(max(0.001, FRAME_SECONDS - frame_cost))
+        else:
+            time.sleep(0.1)
+
+
+if __name__ == "__main__":
+    run_forever()
 # type: ignore

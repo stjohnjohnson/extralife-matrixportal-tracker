@@ -9,6 +9,16 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 sys.path.append(str(ROOT))
 
+from lib_celebration import (  # noqa: E402
+    ENTRANCE_SECONDS,
+    EXIT_SECONDS,
+    Celebration,
+    paint_text,
+    slide_frame,
+    sparkle_pixels,
+    star_thresholds,
+    starburst_frame,
+)
 from lib_display import (  # noqa: E402
     _pair_adjusted_text,
     display_colors,
@@ -31,12 +41,28 @@ class Glyph:
         self.dy = dy
         self.shift_x = shift_x
         self.bitmap_rows = tuple(bitmap_rows)
+        self.bitmap = GlyphBitmap(self.bitmap_rows)
+
+
+class GlyphBitmap:
+    """Read the actual BDF bits through the device glyph bitmap interface."""
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __getitem__(self, position):
+        column, row = position
+        value = self.rows[row]
+        return bool(int(value, 16) & (1 << (len(value) * 4 - column - 1)))
 
 
 class BdfFont:
     def __init__(self, *, ascent, glyphs):
         self.ascent = ascent
         self.glyphs = glyphs
+
+    def get_glyph(self, code_point):
+        return self.glyphs.get(chr(code_point))
 
 
 class TextLayout:
@@ -292,10 +318,74 @@ def render_previews(output_dir):
     return written
 
 
+def render_celebration_frame(font, amount, name, elapsed):
+    """Render production transition helpers with the real font and palette."""
+    palette = (BLACK, TEAL, GREEN, GOLD)
+    normal_pixels = render_card(font, preview_states()["countdown"][0])
+    normal = bytearray(palette.index(pixel) for row in normal_pixels for pixel in row)
+    texts = (display_text(amount), display_text(name))
+    boxes = [layout_text(font, text).bounding_box for text in texts]
+    celebration = Celebration(*boxes)
+    stage = celebration.stage(elapsed)
+    card = bytearray(2048)
+    reading_time = min(elapsed, celebration.exit_at)
+    positions = celebration.positions(0 if stage == "entrance" else reading_time)
+    colors = (2 if amount.startswith("$") else 1, 1)
+    for text, position, color in zip(texts, positions, colors):
+        paint_text(card, font, text, position, color)
+    target = bytearray(2048)
+    if stage == "entrance":
+        starburst_frame(
+            target, normal, card, star_thresholds(), elapsed / ENTRANCE_SECONDS
+        )
+    elif stage == "exit":
+        slide_frame(
+            target, card, normal, (elapsed - celebration.exit_at) / EXIT_SECONDS
+        )
+    elif stage == "done":
+        target = normal
+    else:
+        target = card
+        if stage == "sparkles":
+            for x, y in sparkle_pixels(elapsed - ENTRANCE_SECONDS):
+                target[y * 64 + x] = 3
+    return [
+        [palette[value] for value in target[row * 64 : (row + 1) * 64]]
+        for row in range(32)
+    ]
+
+
+def render_celebration_previews(output_dir):
+    """Write entrance, reading/scrolling, return, and anonymous examples."""
+    font = load_bdf(ROOT / "Micro5-Regular-21.bdf")
+    samples = (
+        ("sequence", "$25.50", "SAM", (0, 0.36, 0.8, 1.84, 4, 7.7, 8.2)),
+        ("long-name", "$25", "ALEXANDRA JOHNSON", (3.5, 4.5, 6.5, 8.1)),
+        ("private", "THANKS!", "ANON", (1.84, 4)),
+    )
+    written = []
+    for title, amount, name, times in samples:
+        frames = [
+            _scale_pixels(render_celebration_frame(font, amount, name, elapsed), 8)
+            for elapsed in times
+        ]
+        path = Path(output_dir) / ("celebration-" + title + ".png")
+        write_png(path, _horizontal_strip(frames, gap=16))
+        written.append(path)
+    return written
+
+
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: render_display_previews.py OUTPUT_DIRECTORY")
-    for path in render_previews(Path(sys.argv[1])):
+    if len(sys.argv) not in (2, 3) or (
+        len(sys.argv) == 3 and sys.argv[2] != "--celebrations"
+    ):
+        raise SystemExit(
+            "usage: render_display_previews.py OUTPUT_DIRECTORY [--celebrations]"
+        )
+    paths = render_previews(Path(sys.argv[1]))
+    if len(sys.argv) == 3:
+        paths += render_celebration_previews(sys.argv[1])
+    for path in paths:
         print(path)
 
 
