@@ -3,8 +3,8 @@
 PYTHON ?= python3
 CIRCUITPY ?= /Volumes/CIRCUITPY
 SERIAL ?= $(shell ls /dev/cu.usbmodem* 2>/dev/null | head -n 1)
-INSTALL_FILES = code.py lib_display.py Micro5-Regular-21.bdf lib
-UPDATE_FILES = code.py lib_display.py Micro5-Regular-21.bdf
+INSTALL_FILES = code.py lib_display.py lib_donations.py lib_celebration.py Micro5-Regular-21.bdf lib
+UPDATE_FILES = code.py lib_display.py lib_donations.py lib_celebration.py Micro5-Regular-21.bdf
 
 lint:
 	$(PYTHON) -m ruff check .

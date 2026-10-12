@@ -15,4 +15,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["lib_display", "tools"]
+known-first-party = ["lib_celebration", "lib_display", "lib_donations", "tools"]
