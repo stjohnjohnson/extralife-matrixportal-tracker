@@ -54,7 +54,7 @@ unittest and the existing BDF preview renderer.
   retain their existing text and layout. Only countdown slots 0 and 2, game-day
   slot 0, and post-event slot 0 receive the calculated `goal_width`.
 
-- [ ] **Step 1: Add failing display tests.** In `tests/test_lib_display.py`, test
+- [x] **Step 1: Add failing display tests.** In `tests/test_lib_display.py`, test
   the exact fill values below. Test missing total/goal, zero and negative goals,
   nonnumeric/bool inputs, negative totals, and NaN/infinite values return `None`.
   Positive goals with zero donations return `0`, distinguishing unavailable data.
@@ -70,18 +70,18 @@ unittest and the existing BDF preview renderer.
   All other slots return `None`; eligible slots also return `None`
   for missing total or zero goal. Assert text/alignment remain unchanged.
 
-- [ ] **Step 2: Run `python3 -m unittest tests.test_lib_display -v`.** Expect
+- [x] **Step 2: Run `python3 -m unittest tests.test_lib_display -v`.** Expect
   failures identifying the missing helper/state behavior.
 
-- [ ] **Step 3: Implement the interfaces above in `lib_display.py`.** Reject
+- [x] **Step 3: Implement the interfaces above in `lib_display.py`.** Reject
   invalid inputs before division; use `int(clamped_fraction * width + 0.5)` for
   nearest-pixel fill. Use explicit phase/card eligibility, never label parsing
   or money-color inference, since historical and all-time cards also show money.
 
-- [ ] **Step 4: Run `python3 -m unittest tests.test_lib_display -v`.** Expect all
+- [x] **Step 4: Run `python3 -m unittest tests.test_lib_display -v`.** Expect all
   existing and new display tests to pass.
 
-- [ ] **Step 5: Commit only this task's display logic and tests.** Suggested
+- [x] **Step 5: Commit only this task's display logic and tests.** Suggested
   subject: `feat: model fundraising goal progress on current-year cards`.
   Include a body explaining card eligibility and unavailable/zero-goal handling.
 
@@ -102,7 +102,7 @@ unittest and the existing BDF preview renderer.
 - Make preview `render_card(font, state, text_transform=display_text)` include
   the optional bar without changing its public signature or label origins.
 
-- [ ] **Step 1: Add failing integration tests.** Extend the existing Simulation
+- [x] **Step 1: Add failing integration tests.** Extend the existing Simulation
   with optional request outcomes and display observations, keeping defaults
   unchanged. In `tests/test_runtime.py`, assert: unavailable startup hides the
   layer; a successful 730/1000 response fills 47 pixels per row; a subsequent
@@ -113,7 +113,7 @@ unittest and the existing BDF preview renderer.
   again after completion on eligible cards. Extend the existing snapshot-failure
   retry test to assert the same visibility recovery.
 
-- [ ] **Step 2: Add failing pixel preview tests.** In
+- [x] **Step 2: Add failing pixel preview tests.** In
   `tests/test_display_previews.py`, compare every row above y=30 against the
   same state with `goal_width=None`. Assert y=30 and y=31 contain the exact
   green/track split for widths 0, 47, and 64. Verify `999:59:59`, `$999,999`, and
@@ -121,17 +121,17 @@ unittest and the existing BDF preview renderer.
   In `tests/test_celebration_previews.py`, assert celebration hold and transition
   snapshots remain bar-free and preserve the existing pixel expectations.
 
-- [ ] **Step 3: Run `python3 -m unittest tests.test_runtime
+- [x] **Step 3: Run `python3 -m unittest tests.test_runtime
   tests.test_display_previews tests.test_celebration_previews -v` as one shell
   command.** Expect new tests to fail on missing cache/layer/preview behavior.
 
-- [ ] **Step 4: Implement the runtime interfaces in `code.py`.** Feed raw goal
+- [x] **Step 4: Implement the runtime interfaces in `code.py`.** Feed raw goal
   into `render_state`, reuse the allocated layer, and preserve atomic cache
   updates. Hide the bar before celebration snapshots, including exit snapshots;
   the normal render after finish/error recovery decides whether to restore it.
   Keep API requests, refresh timers, label positioning, and animation code intact.
 
-- [ ] **Step 5: Update `tools/render_display_previews.py`.** Draw the shared
+- [x] **Step 5: Update `tools/render_display_previews.py`.** Draw the shared
   geometry/colors only when `state.goal_width is not None`. Keep the existing
   default preview states bar-free for snapshot tests. Add
   `render_goal_progress_previews(output_dir)` returning written paths, called
@@ -139,21 +139,29 @@ unittest and the existing BDF preview renderer.
   100%, and 117% using eligible states. Test the file and pixel states in
   `tests/test_display_previews.py`.
 
-- [ ] **Step 6: Update `README.md`.** Describe the two-pixel bar, eligible cards,
+- [x] **Step 6: Update `README.md`.** Describe the two-pixel bar, eligible cards,
   goal from the existing API, zero/missing-goal suppression, celebration hiding,
   and retained progress after refresh failures. No new configuration setting.
 
-- [ ] **Step 7: Run `make lint` and `make test`.** Both must exit 0. If the
+- [x] **Step 7: Run `make lint` and `make test`.** Both must exit 0. If the
   default interpreter lacks ruff/black, use a temporary desktop virtualenv and
   the Makefile's existing `PYTHON` override; do not add device dependencies.
   Run `python3 tools/render_display_previews.py /tmp/goal-progress-previews
   --celebrations` as one command and inspect normal and celebration sheets.
 
-- [ ] **Step 8: Commit this task's runtime, previews, documentation, and tests.**
+- [x] **Step 8: Commit this task's runtime, previews, documentation, and tests.**
   Suggested subject: `feat: render two-pixel fundraising goal bar`.
   Include a body explaining the separate normal layer and integration checks.
 
 ## Physical-device follow-through
+
+Implementation completed on `codex/goal-progress-bar` in commits `8e03b53` and
+`7994f1d`. `make lint` and `make test` pass using the temporary desktop Python
+environment (93 tests plus the mock display). Goal and celebration previews
+were rendered and inspected. Independent whole-branch review found no critical,
+important, or minor issues and confirmed readiness to merge. Hardware appearance
+and device runtime/memory remain unverified until deployment; supported display
+dimensions remain the specified 64x32.
 
 - [ ] After implementation review and deployment authorization, use `make update`.
 - [ ] Check physical visibility of the bright fill and dim track and separation
