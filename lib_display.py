@@ -5,6 +5,8 @@ PHASE_COUNTDOWN = "countdown"
 PHASE_GAME_DAY = "game_day"
 PHASE_POST = "post"
 CARD_SECONDS = 15
+GOAL_BAR_HEIGHT = 2
+GOAL_TRACK_COLOR = 0x17280C
 ALIGN_CENTER = "center"
 ALIGN_LEFT = "left"
 ALIGN_RIGHT = "right"
@@ -152,6 +154,7 @@ class DisplayState:
         bottom_is_accent: bool = False,
         top_align: str = ALIGN_CENTER,
         bottom_align: str = ALIGN_CENTER,
+        goal_width=None,
     ):
         self.phase = phase
         self.top_text = top_text
@@ -162,6 +165,7 @@ class DisplayState:
         self.bottom_is_accent = bottom_is_accent
         self.top_align = top_align
         self.bottom_align = bottom_align
+        self.goal_width = goal_width
 
 
 def _display_color(*, is_money, is_accent, context_color, money_color, accent_color):
@@ -211,6 +215,20 @@ def _live_dollars(total_raised):
     return format_dollars(total_raised)
 
 
+def goal_bar_width(total_raised, fundraising_goal, width=64):
+    """Return filled columns, or None when a usable total/goal is unavailable."""
+    for value in (total_raised, fundraising_goal):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+    if not 0 <= total_raised < float("inf"):
+        return None
+    if not 0 < fundraising_goal < float("inf"):
+        return None
+    if total_raised >= fundraising_goal:
+        return width
+    return int(total_raised / fundraising_goal * width + 0.5)
+
+
 def _card(phase, values):
     (
         top_text,
@@ -246,6 +264,7 @@ def render_state(
     last_year: int,
     lifetime_raised: float,
     rotation_elapsed: float,
+    fundraising_goal=None,
 ) -> DisplayState:
     phase = display_phase(
         target_date=target_date,
@@ -417,4 +436,11 @@ def render_state(
         )
 
     slot = int(rotation_elapsed // CARD_SECONDS) % len(cards)
-    return _card(phase, cards[slot])
+    state = _card(phase, cards[slot])
+    if (
+        (phase == PHASE_COUNTDOWN and slot in (0, 2))
+        or phase == PHASE_GAME_DAY
+        or (phase == PHASE_POST and slot == 0)
+    ):
+        state.goal_width = goal_bar_width(total_raised, fundraising_goal)
+    return state
