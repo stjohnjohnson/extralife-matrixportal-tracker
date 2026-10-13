@@ -24,6 +24,8 @@ from lib_celebration import (
     starburst_frame,
 )
 from lib_display import (
+    GOAL_BAR_HEIGHT,
+    GOAL_TRACK_COLOR,
     RotationClock,
     display_colors,
     display_phase,
@@ -115,6 +117,14 @@ money_label.color = color[2]
 normal_group = displayio.Group()
 normal_group.append(clock_label)
 normal_group.append(money_label)
+goal_bitmap = displayio.Bitmap(64, GOAL_BAR_HEIGHT, 2)
+goal_colors = displayio.Palette(2)
+goal_colors[0] = GOAL_TRACK_COLOR
+goal_colors[1] = color[2]
+goal_bar = displayio.TileGrid(goal_bitmap, pixel_shader=goal_colors)
+goal_bar.y = display.height - GOAL_BAR_HEIGHT
+goal_bar.hidden = True
+normal_group.append(goal_bar)
 group.append(normal_group)
 
 # Celebration labels and snapshots are reused, rather than allocated per frame.
@@ -136,7 +146,7 @@ sparkle_colors[3] = color[3]
 sparkle_colors.make_transparent(0)
 group.append(displayio.TileGrid(sparkles, pixel_shader=sparkle_colors))
 # Caching
-donation_cache = ["--", "--", 0.0, None]
+donation_cache = ["--", "--", 0.0, None, None]
 tracker = DonationTracker()
 schedule = PollSchedule(refresh_frequency)
 rotation_clock = RotationClock()
@@ -159,6 +169,7 @@ def money_raised(cached=True):
         str: The dollar donation goal.
         float: Percent of goal met.
         float: The raw donation total.
+        float: The raw fundraising goal.
     """
     global donation_cache
     if not cached:
@@ -170,10 +181,15 @@ def money_raised(cached=True):
         donation_goal = data["fundraisingGoal"]
         if (
             not isinstance(donation_total, (int, float))
+            or isinstance(donation_total, bool)
             or not 0 <= donation_total <= 1e9
         ):
             raise ValueError("Invalid donation total")
-        if not isinstance(donation_goal, (int, float)) or not 0 <= donation_goal <= 1e9:
+        if (
+            not isinstance(donation_goal, (int, float))
+            or isinstance(donation_goal, bool)
+            or not 0 <= donation_goal <= 1e9
+        ):
             raise ValueError("Invalid fundraising goal")
         donation_percent = 0.0
         if donation_goal > 0:
@@ -184,14 +200,21 @@ def money_raised(cached=True):
             format_dollars(donation_goal),
             donation_percent,
             donation_total,
+            donation_goal,
         ]
 
-    return donation_cache[0], donation_cache[1], donation_cache[2], donation_cache[3]
+    return (
+        donation_cache[0],
+        donation_cache[1],
+        donation_cache[2],
+        donation_cache[3],
+        donation_cache[4],
+    )
 
 
 def update_display():
     """Render the current phase and rotation card."""
-    _, _, _, total_raised_value = money_raised()
+    _, _, _, total_raised_value, fundraising_goal = money_raised()
     now = datetime.now()
     monotonic_now = time.monotonic()
     phase = display_phase(
@@ -216,6 +239,7 @@ def update_display():
         last_year=last_year,
         lifetime_raised=lifetime_raised,
         rotation_elapsed=rotation_elapsed,
+        fundraising_goal=fundraising_goal,
     )
 
     top_text = display_text(state.top_text)
@@ -231,6 +255,12 @@ def update_display():
         accent_color=color[3],
     )
     display_labels(state, clock_label, money_label)
+    goal_bar.hidden = state.goal_width is None or active_celebration is not None
+    if not goal_bar.hidden:
+        goal_bitmap.fill(0)
+        for y in range(GOAL_BAR_HEIGHT):
+            for x in range(state.goal_width):
+                goal_bitmap[y * display.width + x] = 1
 
 
 def display_labels(state, top, bottom=None):

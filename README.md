@@ -19,6 +19,15 @@ The display adapts to four phases of the annual fundraiser:
 Cards remain visible for 15 seconds and change without animation so the display
 stays calm when it appears in the background of video calls.
 
+A two-pixel green progress bar appears below the current-year donation total
+on countdown/count-up cards and the post-event current-year result card. It
+fills toward the fundraising goal from the existing participant API, with a
+dim green track for the remainder. The fill stops at 100% while the dollar
+total continues to reflect donations above the goal. A zero or unavailable
+goal hides the bar; failed refreshes retain the last valid progress.
+Historical, all-time, and context cards hide it. Donation celebrations hide
+the bar through their exit, then eligible normal cards restore it.
+
 New donations interrupt the display year-round, one gift at a time. An expanding
 gold arcade starburst reveals the green amount above the blue donor name over
 1.8 seconds. Small gold sparkles play for 1.7 seconds before scrolling begins;
@@ -213,7 +222,8 @@ actual device loop using desktop display/network doubles. These checks do not
 measure animation speed, available RAM, or live API behavior on the device.
 
 Render every normal card and the donation entrance, scrolling, privacy fallbacks,
-and return using the bundled BDF font:
+and return using the bundled BDF font, plus a goal progress comparison at 0%,
+73%, 100%, and 117%:
 
 ```bash
 python3 tools/render_display_previews.py /tmp/display-previews --celebrations

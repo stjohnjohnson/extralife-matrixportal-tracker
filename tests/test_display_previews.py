@@ -16,11 +16,13 @@ from lib_display import (
 from tools.render_display_previews import (
     BLACK,
     GOLD,
+    GREEN,
     TEAL,
     layout_text,
     load_bdf,
     preview_states,
     render_card,
+    render_goal_progress_previews,
     render_previews,
 )
 
@@ -90,6 +92,39 @@ class RenderPreviewTests(unittest.TestCase):
             for state in cards:
                 self.assertEqual(state.top_align, ALIGN_CENTER)
                 self.assertEqual(state.bottom_align, ALIGN_CENTER)
+
+    def test_goal_bar_changes_only_the_bottom_two_rows(self):
+        for phase, slot in (("countdown", 0), ("game_day", 0), ("post", 0)):
+            state = preview_states()[phase][slot]
+            baseline = render_card(self.font, state)
+            for width in (0, 47, 64):
+                with self.subTest(phase=phase, width=width):
+                    state.goal_width = width
+                    pixels = render_card(self.font, state)
+                    self.assertEqual(pixels[:30], baseline[:30])
+                    self.assertEqual(
+                        pixels[30],
+                        [GREEN] * width + [(0x17, 0x28, 0x0C)] * (64 - width),
+                    )
+                    self.assertEqual(pixels[31], pixels[30])
+
+    def test_largest_timer_and_money_leave_bottom_rows_clear(self):
+        for phase in ("countdown", "game_day", "post"):
+            state = preview_states()[phase][0]
+            if phase == "post":
+                state.top_text = "$999,999"
+            else:
+                state.top_text = "999:59:59"
+                state.bottom_text = "$999,999"
+            self.assertEqual(render_card(self.font, state)[30:], [[BLACK] * 64] * 2)
+
+    def test_goal_preview_sheet_renders_zero_partial_full_and_above_goal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = render_goal_progress_previews(directory)
+            self.assertEqual([p.name for p in paths], ["goal-progress.png"])
+            data = paths[0].read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", data[16:24]), (2096, 256))
 
     def test_rendered_context_card_uses_exact_colors_and_dimensions(self):
         state = preview_states()["pre"][2]
