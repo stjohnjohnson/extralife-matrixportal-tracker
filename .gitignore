@@ -164,3 +164,7 @@ cython_debug/
 # CircuitPython Stuff
 boot_out.txt
 secrets.py
+
+# Local design and implementation plans
+docs/plans/
+docs/superpowers/plans/
