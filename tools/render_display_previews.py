@@ -20,6 +20,8 @@ from lib_celebration import (  # noqa: E402
     starburst_frame,
 )
 from lib_display import (  # noqa: E402
+    GOAL_BAR_HEIGHT,
+    GOAL_TRACK_COLOR,
     _pair_adjusted_text,
     display_colors,
     display_text,
@@ -31,6 +33,11 @@ BLACK = (0x00, 0x00, 0x00)
 TEAL = (0x1A, 0xC1, 0xDD)
 GREEN = (0x85, 0xFF, 0x00)
 GOLD = (0xFF, 0xB0, 0x00)
+GOAL_TRACK = (
+    (GOAL_TRACK_COLOR >> 16) & 0xFF,
+    (GOAL_TRACK_COLOR >> 8) & 0xFF,
+    GOAL_TRACK_COLOR & 0xFF,
+)
 
 
 class Glyph:
@@ -212,6 +219,10 @@ def render_card(font, state, text_transform=display_text):
     pixels = [[BLACK for _ in range(64)] for _ in range(32)]
     _draw_text(pixels, top_layout, top_position, top_color)
     _draw_text(pixels, bottom_layout, bottom_position, bottom_color)
+    if state.goal_width is not None:
+        for y in range(32 - GOAL_BAR_HEIGHT, 32):
+            for x in range(64):
+                pixels[y][x] = GREEN if x < state.goal_width else GOAL_TRACK
     return pixels
 
 
@@ -275,6 +286,30 @@ def _vertical_overview(images, gap):
             overview[top + y][left : left + image_width] = row
         top += len(image) + gap
     return overview
+
+
+def render_goal_progress_previews(output_dir):
+    """Compare zero, partial, complete, and above-goal fundraising cards."""
+    font = load_bdf(ROOT / "Micro5-Regular-21.bdf")
+    target = datetime(2026, 11, 7, 16, 30)
+    images = []
+    for total in (0, 18250, 25000, 29250):
+        state = render_state(
+            target_date=target,
+            now=target - timedelta(hours=999),
+            total_raised=total,
+            fundraising_goal=25000,
+            hide_before=1000,
+            hide_after=26,
+            last_raised=28783,
+            last_year=2025,
+            lifetime_raised=88488,
+            rotation_elapsed=0,
+        )
+        images.append(_scale_pixels(render_card(font, state), 8))
+    path = Path(output_dir) / "goal-progress.png"
+    write_png(path, _horizontal_strip(images, gap=16))
+    return [path]
 
 
 def render_previews(output_dir):
@@ -383,6 +418,7 @@ def main():
             "usage: render_display_previews.py OUTPUT_DIRECTORY [--celebrations]"
         )
     paths = render_previews(Path(sys.argv[1]))
+    paths += render_goal_progress_previews(sys.argv[1])
     if len(sys.argv) == 3:
         paths += render_celebration_previews(sys.argv[1])
     for path in paths:

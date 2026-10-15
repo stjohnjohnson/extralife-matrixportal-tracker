@@ -17,6 +17,7 @@ from lib_display import (
     display_colors,
     display_phase,
     display_text,
+    goal_bar_width,
     label_x,
     render_state,
     single_line_position,
@@ -148,6 +149,34 @@ class LabelPositionTests(unittest.TestCase):
         )
 
 
+class GoalProgressTests(unittest.TestCase):
+    def test_fill_rounds_to_nearest_pixel_and_caps_at_goal(self):
+        for total, expected in ((0, 0), (250, 16), (730, 47), (1000, 64), (1170, 64)):
+            with self.subTest(total=total):
+                self.assertEqual(goal_bar_width(total, 1000), expected)
+        self.assertEqual(goal_bar_width(0.5, 64), 1)
+
+    def test_missing_or_invalid_values_hide_the_bar(self):
+        invalid_pairs = (
+            (None, 1000),
+            (0, None),
+            (0, 0),
+            (0, -1),
+            (-1, 1000),
+            ("730", 1000),
+            (730, "1000"),
+            (True, 1000),
+            (730, True),
+            (float("nan"), 1000),
+            (730, float("nan")),
+            (float("inf"), 1000),
+            (730, float("inf")),
+        )
+        for total, goal in invalid_pairs:
+            with self.subTest(total=total, goal=goal):
+                self.assertIsNone(goal_bar_width(total, goal))
+
+
 class RenderStateTests(unittest.TestCase):
     def render(
         self,
@@ -155,6 +184,7 @@ class RenderStateTests(unittest.TestCase):
         slot=0,
         total_raised=1234.0,
         rotation_elapsed=None,
+        fundraising_goal=None,
     ):
         if rotation_elapsed is None:
             rotation_elapsed = slot * 15
@@ -168,6 +198,37 @@ class RenderStateTests(unittest.TestCase):
             last_year=2025,
             lifetime_raised=88488,
             rotation_elapsed=rotation_elapsed,
+            fundraising_goal=fundraising_goal,
+        )
+
+    def test_goal_bar_only_on_current_year_total_cards(self):
+        cases = (
+            (TARGET - timedelta(days=100), (None, None, None, None, None)),
+            (TARGET - timedelta(hours=999), (32, None, 32, None)),
+            (TARGET + timedelta(hours=12), (32,)),
+            (TARGET + timedelta(hours=26), (32, None, None, None)),
+        )
+        for now, widths in cases:
+            for slot in range(len(widths) * 2):
+                with self.subTest(now=now, slot=slot):
+                    baseline = self.render(now, slot, total_raised=1000)
+                    state = self.render(
+                        now, slot, total_raised=1000, fundraising_goal=2000
+                    )
+                    self.assertEqual(state.goal_width, widths[slot % len(widths)])
+                    self.assertEqual(state.top_text, baseline.top_text)
+                    self.assertEqual(state.bottom_text, baseline.bottom_text)
+                    self.assertEqual(state.top_align, baseline.top_align)
+                    self.assertEqual(state.bottom_align, baseline.bottom_align)
+
+    def test_eligible_card_hides_bar_without_total_or_positive_goal(self):
+        now = TARGET + timedelta(hours=12)
+        for total, goal in ((None, 1000), (730, None), (730, 0)):
+            with self.subTest(total=total, goal=goal):
+                state = self.render(now, total_raised=total, fundraising_goal=goal)
+                self.assertIsNone(state.goal_width)
+        self.assertEqual(
+            self.render(now, total_raised=0, fundraising_goal=1000).goal_width, 0
         )
 
     def assert_card(

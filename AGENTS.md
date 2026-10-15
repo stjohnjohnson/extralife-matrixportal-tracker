@@ -40,4 +40,5 @@ CircuitPython app for Adafruit MatrixPortal M4 that displays an Extra Life count
 
 ## Contribution Guidelines
 - Keep file edits minimal and focused.
+- Keep design and implementation plans local and untracked; do not commit them.
 - Preserve CircuitPython compatibility (avoid CPython-only modules).

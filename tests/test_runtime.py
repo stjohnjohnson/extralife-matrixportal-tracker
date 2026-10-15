@@ -72,12 +72,17 @@ def module(name, **fields):
 
 
 class Simulation:
-    def __init__(self, base=datetime(2026, 10, 12, 12), fail_feed=False):
+    def __init__(
+        self, base=datetime(2026, 10, 12, 12), fail_feed=False, total_responses=None
+    ):
         self.now, self.base, self.fail_feed = 0.0, base, fail_feed
         self.labels, self.requests, self.responses, self.celebrated = [], [], [], []
         self.animation_frames = 0
         self.display = types.SimpleNamespace(width=64, height=32, root_group=None)
         self.font = load_bdf(ROOT / "Micro5-Regular-21.bdf")
+        self.total_responses = list(total_responses or [])
+        self.goal_observations = []
+        self.namespace = None
 
     def donation(self, identifier, second, name):
         created = (self.base + timedelta(seconds=second)).isoformat(
@@ -96,12 +101,18 @@ class Simulation:
         self.requests.append((self.now, url, busy))
         self.now += 0.4  # Real synchronous requests delay the device loop.
         if "/donations?" not in url:
-            response = Response(
-                {
-                    "sumDonations": 100 + (51 if self.now >= 21 else 0),
-                    "fundraisingGoal": 1000,
-                }
+            response = (
+                self.total_responses.pop(0)
+                if self.total_responses
+                else Response(
+                    {
+                        "sumDonations": 100 + (51 if self.now >= 21 else 0),
+                        "fundraisingGoal": 1000,
+                    }
+                )
             )
+            if isinstance(response, Exception):
+                raise response
         else:
             feed_calls = sum("/donations?" in request[1] for request in self.requests)
             if self.fail_feed and feed_calls == 2:
@@ -135,6 +146,13 @@ class Simulation:
         return response
 
     def sleep(self, seconds):
+        if self.namespace and "goal_bar" in self.namespace:
+            self.goal_observations.append(
+                (
+                    bool(self.namespace["active_celebration"]),
+                    self.namespace["goal_bar"].hidden,
+                )
+            )
         if len(self.labels) >= 4 and not self.labels[2].parent.hidden:
             name = self.labels[3].text
             if not self.celebrated or self.celebrated[-1][0] != name:
@@ -205,6 +223,7 @@ class Simulation:
             ),
         }
         namespace = {"__name__": "__main__"}
+        self.namespace = namespace
         with patch.dict(sys.modules, modules), patch(
             "time.monotonic", lambda: self.now
         ), patch("time.sleep", self.sleep), patch("builtins.print"):
@@ -221,6 +240,102 @@ class Simulation:
 
 
 class DeviceLoopTests(unittest.TestCase):
+    def test_goal_bar_stays_hidden_when_initial_total_requests_fail(self):
+        simulation = Simulation(total_responses=[Response({}, 503) for _ in range(8)])
+        namespace = simulation.run()
+        self.assertIsNone(namespace["donation_cache"][3])
+        self.assertIsNone(namespace["donation_cache"][4])
+        self.assertTrue(namespace["goal_bar"].hidden)
+        self.assertTrue(all(hidden for _, hidden in simulation.goal_observations))
+
+    def test_goal_bar_fills_both_bottom_rows_and_hides_after_zero_goal(self):
+        simulation = Simulation(base=datetime(2026, 11, 7, 17))
+        namespace = simulation.run()
+        simulation.total_responses.append(
+            Response({"sumDonations": 730, "fundraisingGoal": 1000})
+        )
+        namespace["money_raised"](False)
+        with patch("time.monotonic", lambda: simulation.now):
+            namespace["update_display"]()
+        self.assertFalse(namespace["goal_bar"].hidden)
+        self.assertEqual(namespace["goal_bar"].y, 30)
+        self.assertEqual(namespace["goal_bitmap"], ([1] * 47 + [0] * 17) * 2)
+        self.assertEqual(namespace["goal_bar"].pixel_shader, [0x17280C, 0x85FF00])
+        simulation.total_responses.append(
+            Response({"sumDonations": 730, "fundraisingGoal": 0})
+        )
+        namespace["money_raised"](False)
+        with patch("time.monotonic", lambda: simulation.now):
+            namespace["update_display"]()
+        self.assertTrue(namespace["goal_bar"].hidden)
+
+    def test_invalid_total_refresh_keeps_total_and_goal_together(self):
+        simulation = Simulation(base=datetime(2026, 11, 7, 17))
+        namespace = simulation.run()
+        simulation.total_responses.append(
+            Response({"sumDonations": 730, "fundraisingGoal": 1000})
+        )
+        self.assertEqual(
+            namespace["money_raised"](False), ("$730", "$1,000", 73.0, 730, 1000)
+        )
+        expected = ["$730", "$1,000", 73.0, 730, 1000]
+        for response in (
+            OSError("offline"),
+            Response({}, 503),
+            Response({"sumDonations": 800}),
+            Response({"sumDonations": 800, "fundraisingGoal": "bad"}),
+            Response({"sumDonations": True, "fundraisingGoal": 2000}),
+            Response({"sumDonations": 800, "fundraisingGoal": True}),
+            Response({"sumDonations": float("nan"), "fundraisingGoal": 2000}),
+        ):
+            with self.subTest(response=response):
+                simulation.total_responses.append(response)
+                with self.assertRaises((OSError, RuntimeError, KeyError, ValueError)):
+                    namespace["money_raised"](False)
+                self.assertEqual(namespace["donation_cache"], expected)
+                with patch("time.monotonic", lambda: simulation.now):
+                    namespace["update_display"]()
+                self.assertFalse(namespace["goal_bar"].hidden)
+                self.assertEqual(namespace["goal_bitmap"], ([1] * 47 + [0] * 17) * 2)
+
+    def test_goal_layer_follows_all_annual_rotation_cards(self):
+        for base, hidden in (
+            (datetime(2026, 1, 1), (True, True, True, True, True)),
+            (datetime(2026, 10, 12), (False, True, False, True)),
+            (datetime(2026, 11, 7, 17), (False,)),
+            (datetime(2026, 12, 1), (False, True, True, True)),
+        ):
+            simulation = Simulation(base=base)
+            namespace = simulation.run()
+            for slot in range(len(hidden) * 2):
+                with self.subTest(base=base, slot=slot):
+                    clock = namespace["rotation_clock"]
+                    clock.elapsed = slot * 15
+                    clock.updated_at = simulation.now
+                    clock.paused = False
+                    with patch("time.monotonic", lambda: simulation.now):
+                        namespace["update_display"]()
+                    self.assertEqual(
+                        namespace["goal_bar"].hidden, hidden[slot % len(hidden)]
+                    )
+
+    def test_goal_bar_hides_for_entire_celebration_and_returns_afterward(self):
+        simulation = Simulation(base=datetime(2026, 11, 7, 17))
+        namespace = simulation.run()
+        busy = [hidden for active, hidden in simulation.goal_observations if active]
+        self.assertTrue(busy)
+        self.assertTrue(all(busy))
+        self.assertFalse(namespace["goal_bar"].hidden)
+        self.assertTrue(
+            any(
+                not hidden
+                for active, hidden in simulation.goal_observations
+                if not active
+            )
+        )
+        self.assertEqual(namespace["old_snapshot"][-128:], [0] * 128)
+        self.assertEqual(namespace["new_snapshot"][-128:], [0] * 128)
+
     def test_frame_budget_includes_rendering_time(self):
         from lib_celebration import starburst_frame
 
@@ -238,7 +353,7 @@ class DeviceLoopTests(unittest.TestCase):
         self.assertGreaterEqual(len(first_entrance), 15)
 
     def test_snapshot_failure_restores_display_and_retries_the_same_donor(self):
-        simulation = Simulation()
+        simulation = Simulation(base=datetime(2026, 11, 7, 17))
         original_glyph = simulation.font.get_glyph
         failures = []
 
@@ -263,6 +378,10 @@ class DeviceLoopTests(unittest.TestCase):
         self.assertEqual(namespace["tracker"].pending, [])
         self.assertFalse(any(namespace["bitmap"]))
         self.assertFalse(any(namespace["sparkles"]))
+        self.assertFalse(namespace["goal_bar"].hidden)
+        self.assertTrue(
+            all(hidden for active, hidden in simulation.goal_observations if active)
+        )
 
     def test_slow_label_preparation_does_not_consume_the_entrance(self):
         simulation = Simulation()
